@@ -76,6 +76,19 @@ class TestEmbeddingProviders(unittest.TestCase):
             }
         }
         generator = EmbeddingGenerator(config=config)
+        # TextEmbedder silently falls back to the 128-dim hash method whenever
+        # the requested backend cannot be loaded: fastembed missing, or the
+        # model not reachable because the Hugging Face hub is down or
+        # rate-limited. Asserting 384 in that state reports an outage as a
+        # dimension regression, so check which backend is actually active and
+        # skip instead. A loaded fastembed model with the wrong dimension still
+        # fails.
+        active_method = generator.get_text_method()
+        if active_method != "fastembed":
+            self.skipTest(
+                "fastembed backend unavailable: TextEmbedder fell back to "
+                f"'{active_method}', so the model dimension cannot be checked"
+            )
         embeddings = generator.generate_embeddings(["Test text"], data_type="text")
         self.assertEqual(embeddings.shape[1], 384)
         print("EmbeddingGenerator config test passed.")
