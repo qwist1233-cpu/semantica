@@ -2,8 +2,9 @@
 reach the provider factory.
 
 The documented examples passed a constructed provider as ``llm_provider=``.
-Extractors do not take an instance: the keyword lands in ``**config`` and is
-dropped, and the extractor then runs against its default provider. The
+Extractors do not take an instance: the keyword is forwarded to the provider
+factory, where it only lands in the new provider's inert ``config`` mapping, so
+the extractor runs against the backend named by ``provider`` instead. The
 configuration that is actually read is ``provider``, ``llm_model`` and
 ``api_key``, so these tests assert on the ``create_provider`` call itself
 rather than on constructor attributes -- a constructor-only check passes even
@@ -21,6 +22,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from semantica.semantic_extract import methods
+from semantica.semantic_extract.cache import ExtractionCache
 from semantica.semantic_extract.types import Entity
 from semantica.semantic_extract.schemas import (
     EntitiesResponse,
@@ -74,18 +76,21 @@ def _typed_provider() -> MagicMock:
 
 @pytest.fixture
 def factory(monkeypatch):
-    """Patch the factory the methods module calls and clear the result cache.
+    """Patch the factory the methods module calls, over a cache of our own.
 
     The cache keys on provider and model, so a leftover entry from another
-    test would answer before ``create_provider`` is reached.
+    test would answer before ``create_provider`` is reached. The module-level
+    cache is swapped for a fresh in-memory one rather than cleared: with the
+    sqlite backend configured it is persistent, and clearing it would discard
+    entries that have nothing to do with this file. ``monkeypatch`` puts the
+    original back.
     """
-    methods._result_cache.clear()
+    monkeypatch.setattr(methods, "_result_cache", ExtractionCache(max_size=16))
     for env in ("GROQ_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(env, raising=False)
     with patch("semantica.semantic_extract.methods.create_provider") as mock_create:
         mock_create.return_value = _typed_provider()
         yield mock_create
-    methods._result_cache.clear()
 
 
 def _calls(factory):
@@ -111,7 +116,7 @@ def test_ner_extractor_forwards_provider_model_and_key(factory):
 
 
 def test_llm_provider_instance_is_not_used(factory):
-    """``llm_provider=`` is accepted through ``**config`` and ignored."""
+    """``llm_provider=`` reaches the factory as a keyword and stays inert."""
     from semantica.semantic_extract import NERExtractor
 
     instance = MagicMock(name="provider-instance")
@@ -127,7 +132,11 @@ def test_llm_provider_instance_is_not_used(factory):
     instance.generate_typed.assert_not_called()
     instance.generate.assert_not_called()
     assert factory.call_count >= 1
-    assert _calls(factory)[0][0][0] == "groq"
+    args, kwargs = _calls(factory)[0]
+    assert args[0] == "groq", "the instance replaced the configured backend"
+    # Forwarded, not filtered out: it is handed to the factory like any other
+    # unknown keyword and ends up in the provider's config mapping.
+    assert kwargs.get("llm_provider") is instance
 
 
 def test_relation_extractor_forwards_provider_model_and_key(factory):
@@ -193,10 +202,10 @@ def test_triplet_extractor_internal_stages_use_the_configured_provider(factory):
 
 
 def test_model_keyword_does_not_reach_the_internal_stages(factory):
-    """Why the examples use ``llm_model``: ``model`` is stripped from the
-    shared config before the NER and relation stages are built, so the stages
-    run without a model while the triplet stage has one. Pinned as the current
-    behaviour, which is what the documentation now states."""
+    """Why the examples use ``llm_model``: ``model`` configures the triplet
+    stage's own call, but it is stripped from the shared config before the NER
+    and relation stages are built, so those two run without a model. Pinned as
+    the current behaviour, which is what the documentation now states."""
     from semantica.semantic_extract import TripletExtractor
 
     extractor = TripletExtractor(
@@ -208,6 +217,7 @@ def test_model_keyword_does_not_reach_the_internal_stages(factory):
     extractor.extract_triplets("Ada Lovelace corresponded with Charles Babbage.")
 
     models = {kwargs.get("model") for _, kwargs in _calls(factory)}
+    assert MODEL in models, "`model` was expected to configure the triplet stage"
     assert None in models, (
         "a stage was expected to be built without a model; if this now fails, "
         "`model` reaches every stage and the docs note can be dropped"

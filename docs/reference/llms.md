@@ -492,7 +492,7 @@ llm = OpenAI(
 
 ## Using Generative Providers in Extractors
 
-Extractors do not take a provider instance. They build one themselves from keyword configuration: `provider` names the backend (default `"openai"`), `llm_model` picks the model, and `api_key` is read from the matching `<PROVIDER>_API_KEY` variable when it is omitted. `llm_provider=` has no effect here — the keyword is accepted through `**config` and silently ignored, so the extractor constructs and then runs against its default provider. Jev is not usable here either, because it returns decisions rather than generated text:
+Extractors do not take a provider instance. They build one themselves from keyword configuration: `provider` names the backend (default `"openai"`), `llm_model` picks the model, and `api_key` is read from the matching `<PROVIDER>_API_KEY` variable when it is omitted. `llm_provider=` is not read here: it travels through `**config` into the provider factory and is kept in the constructed provider's `config` mapping, which nothing consults — the instance never serves as the extractor's provider, so the extractor runs against the backend named by `provider=` (the `"openai"` default when it is omitted). Jev is not usable here either, because it returns decisions rather than generated text:
 
 ```python
 import os
@@ -515,7 +515,7 @@ trip = TripletExtractor(**llm_config)
 ```
 
 <Note>
-  Use `llm_model`, not `model`. `TripletExtractor` forwards its shared configuration to the entity and relation extractors it builds internally, and `model` is excluded from that forwarding — it is the spaCy/HuggingFace model name for those stages.
+  Use `llm_model`, not `model`. Both names configure an extractor's own LLM call (`llm_model` wins), but `TripletExtractor` strips `model` out of the configuration it shares with the entity and relation extractors it builds internally, because there that keyword is the spaCy/HuggingFace model name. So `model` alone reaches the triplet stage only and the two internal stages fall back to their default LLM model; `llm_model` configures all three.
 </Note>
 
 ## Provider Comparison
