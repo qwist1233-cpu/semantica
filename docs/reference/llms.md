@@ -515,7 +515,7 @@ trip = TripletExtractor(**llm_config)
 ```
 
 <Note>
-  Use `llm_model`, not `model`. Both names configure an extractor's own LLM call (`llm_model` wins), but `TripletExtractor` strips `model` out of the configuration it shares with the entity and relation extractors it builds internally, because there that keyword is the spaCy/HuggingFace model name. So `model` alone reaches the triplet stage only and the two internal stages fall back to their default LLM model; `llm_model` configures all three.
+  Use `llm_model`, not `model`. Both names configure an extractor's own LLM call (`llm_model` wins), but `TripletExtractor` strips `model` out of the configuration it shares with the entity and relation extractors it builds internally, because there that keyword is the spaCy/HuggingFace model name. So `model` alone reaches the triplet stage only, and the two internal stages are built with no LLM model at all: they are constructed with an explicit `model=None`, which overrides the provider's own default. `llm_model` configures all three.
 </Note>
 
 ## Provider Comparison
